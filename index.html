@@ -114,6 +114,47 @@
             position: absolute; bottom: 15px; left: 15px; color: rgba(0,0,0,0.4); 
             pointer-events: none; user-select: none; font-size: 10px; font-weight: 600;
         }
+
+        /* Wind Joystick */
+        #wind-joystick {
+            width: 70px;
+            height: 70px;
+            border-radius: 8px;
+            border: 1px solid var(--border-glass);
+            background: #222;
+            position: relative;
+            touch-action: none;
+        }
+        #wind-joystick::before,
+        #wind-joystick::after {
+            content: "";
+            position: absolute;
+            left: 50%;
+            top: 0;
+            width: 1px;
+            height: 100%;
+            background: rgba(255,255,255,0.08);
+            transform: translateX(-0.5px);
+        }
+        #wind-joystick::after {
+            left: 0;
+            top: 50%;
+            width: 100%;
+            height: 1px;
+            transform: translateY(-0.5px);
+        }
+        #wind-knob {
+            width: 16px;
+            height: 16px;
+            border-radius: 50%;
+            background: var(--accent);
+            position: absolute;
+            left: 50%;
+            top: 50%;
+            transform: translate(-50%, -50%);
+            cursor: pointer;
+            box-shadow: 0 0 4px rgba(0,0,0,0.8);
+        }
     </style>
     <script type="importmap">
         { "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js", "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/" } }
@@ -147,12 +188,30 @@
     <div class="control-row"><label>Collider</label><label class="toggle-switch"><input type="checkbox" id="inp-collider"><span class="slider"></span></label></div>
     
     <div class="control-group">
-        <div class="control-row"><label>Wind (X/Y/Z)</label></div>
-        <div style="display:flex; gap:2px">
-            <input type="range" id="inp-windX" min="-100" max="100" value="20" title="X">
-            <input type="range" id="inp-windY" min="-100" max="100" value="5" title="Y">
-            <input type="range" id="inp-windZ" min="-100" max="100" value="10" title="Z">
+        <div class="control-row"><label>Wind Direction</label></div>
+        <div style="display:flex; gap:6px; align-items:center;">
+            <div id="wind-joystick">
+                <div id="wind-knob"></div>
+            </div>
+            <div style="flex:1;">
+                <div class="control-row"><label>Wind (X/Y/Z)</label></div>
+                <div style="display:flex; gap:2px">
+                    <input type="range" id="inp-windX" min="-200" max="200" value="20" title="X">
+                    <input type="range" id="inp-windY" min="-200" max="200" value="5" title="Y">
+                    <input type="range" id="inp-windZ" min="-200" max="200" value="10" title="Z">
+                </div>
+            </div>
         </div>
+    </div>
+
+    <div class="control-group">
+        <div class="control-row"><label>Wind Strength</label><span id="val-windStrength" class="value-display">1.0</span></div>
+        <input type="range" id="inp-windStrength" min="0" max="10" step="0.1" value="1.0">
+    </div>
+
+    <div class="control-group">
+        <div class="control-row"><label>Wind Variability</label><span id="val-windVariance" class="value-display">1.0</span></div>
+        <input type="range" id="inp-windVariance" min="0" max="5" step="0.1" value="1.0">
     </div>
 
     <h3>Lighting & Shadows</h3>
@@ -419,21 +478,21 @@
             else if (this.settings.pins === 'curtain') for (let u = 0; u <= w; u+=4) this.particles[idx(u, 0)].pinned = true;
         }
 
-        update(dt, globalWind, sphereData, gravityEnabled) {
+        update(dt, globalWind, sphereData, gravityEnabled, windVariance = 1.0) {
             if (!this.isActive) return; // Skip if inactive
 
             const timesq = dt * dt;
             const diff = new THREE.Vector3();
-            const time = Date.now() * 0.001 * this.settings.turbulence;
+            const time = Date.now() * 0.001 * this.settings.turbulence * windVariance;
 
             for (let i = 0; i < this.particles.length; i++) {
                 const p = this.particles[i];
                 if (gravityEnabled) p.addForce(new THREE.Vector3(0, this.settings.gravity, 0));
                 
                 const wind = new THREE.Vector3(
-                    Math.sin(time + p.position.y * 0.1) * this.settings.waveHeight + globalWind.x,
-                    Math.cos(time * 1.1 + p.position.z * 0.1) * (this.settings.waveHeight * 0.5) + globalWind.y,
-                    Math.sin(time * 0.7) * (this.settings.waveHeight * 0.5) + globalWind.z
+                    Math.sin(time + p.position.y * 0.1) * this.settings.waveHeight * windVariance + globalWind.x,
+                    Math.cos(time * 1.1 + p.position.z * 0.1) * (this.settings.waveHeight * 0.5) * windVariance + globalWind.y,
+                    Math.sin(time * 0.7) * (this.settings.waveHeight * 0.5) * windVariance + globalWind.z
                 );
                 p.addForce(wind);
                 p.integrate(timesq, this.settings.damping);
@@ -502,6 +561,7 @@
 
             this.params = {
                 windX: 20, windY: 5, windZ: 10,
+                windStrength: 1.0, windVariance: 1.0,
                 paused: false, gravityEnabled: false,
                 layoutMode: 'XZ Grid', spacing: 250,
                 lightX: 200, lightY: 400, lightZ: 200,
@@ -679,7 +739,11 @@
                     const mat = this.getShader(types[index]);
                     const mesh = new THREE.Mesh(new THREE.PlaneGeometry(1, 1, 20, 20), mat);
                     mesh.castShadow = true; mesh.receiveShadow = true;
-                    mesh.customDepthMaterial = new THREE.MeshDepthMaterial({ depthPacking: THREE.RGBADepthPacking, map: mesh.material.map, alphaTest: 0.5 });
+                    {
+                        const depthOpts = { depthPacking: THREE.RGBADepthPacking, alphaTest: 0.5 };
+                        if (mesh.material.map) depthOpts.map = mesh.material.map;
+                        mesh.customDepthMaterial = new THREE.MeshDepthMaterial(depthOpts);
+                    }
                     
                     const labelCanvas = document.createElement('canvas');
                     const ctx = labelCanvas.getContext('2d');
@@ -717,7 +781,11 @@
             
             const mesh = new THREE.Mesh(new THREE.PlaneGeometry(1, 1, res, res), oldMesh.material);
             mesh.castShadow = true; mesh.receiveShadow = true;
-            mesh.customDepthMaterial = new THREE.MeshDepthMaterial({ depthPacking: THREE.RGBADepthPacking, map: mesh.material.map, alphaTest: 0.5 });
+            {
+                const depthOpts = { depthPacking: THREE.RGBADepthPacking, alphaTest: 0.5 };
+                if (mesh.material.map) depthOpts.map = mesh.material.map;
+                mesh.customDepthMaterial = new THREE.MeshDepthMaterial(depthOpts);
+            }
             mesh.visible = cloth.isActive; // Sync vis
 
             cloth.sprite = oldCloth.sprite;
@@ -787,7 +855,15 @@
                 }
             });
 
-            bind('inp-windX', 'windX'); bind('inp-windY', 'windY'); bind('inp-windZ', 'windZ');
+            bind('inp-windX', 'windX');
+            bind('inp-windY', 'windY');
+            bind('inp-windZ', 'windZ');
+            bind('inp-windStrength', 'windStrength', 'val-windStrength');
+            bind('inp-windVariance', 'windVariance', 'val-windVariance');
+
+            // Keep joystick in sync when sliders change
+            document.getElementById('inp-windX').addEventListener('input', () => this.updateWindJoystickFromParams());
+            document.getElementById('inp-windZ').addEventListener('input', () => this.updateWindJoystickFromParams());
             
             // Lighting
             const updateLight = () => {
@@ -875,6 +951,76 @@
             
             // Sync initial state
             this.updateSelectionUI();
+            this.initWindJoystick();
+        }
+
+        initWindJoystick() {
+            const box = document.getElementById('wind-joystick');
+            const knob = document.getElementById('wind-knob');
+            if (!box || !knob) return;
+
+            const state = { dragging: false };
+
+            const updateFromEvent = (clientX, clientY) => {
+                const rect = box.getBoundingClientRect();
+                let x = (clientX - rect.left) / rect.width;
+                let y = (clientY - rect.top) / rect.height;
+                x = Math.min(Math.max(x, 0), 1);
+                y = Math.min(Math.max(y, 0), 1);
+
+                const normX = (x - 0.5) * 2; // -1..1
+                const normZ = (y - 0.5) * 2; // -1..1 (forward/back)
+
+                const max = 200; // matches slider range
+                const windX = normX * max;
+                const windZ = normZ * max;
+
+                this.params.windX = windX;
+                this.params.windZ = windZ;
+
+                const sx = document.getElementById('inp-windX');
+                const sz = document.getElementById('inp-windZ');
+                if (sx) sx.value = windX.toFixed(0);
+                if (sz) sz.value = windZ.toFixed(0);
+
+                this.updateWindJoystickFromParams();
+            };
+
+            const onPointerDown = (e) => {
+                state.dragging = true;
+                updateFromEvent(e.clientX, e.clientY);
+            };
+
+            const onPointerMove = (e) => {
+                if (!state.dragging) return;
+                updateFromEvent(e.clientX, e.clientY);
+            };
+
+            const onPointerUp = () => {
+                state.dragging = false;
+            };
+
+            box.addEventListener('pointerdown', onPointerDown);
+            window.addEventListener('pointermove', onPointerMove);
+            window.addEventListener('pointerup', onPointerUp);
+
+            this.updateWindJoystickFromParams();
+        }
+
+        updateWindJoystickFromParams() {
+            const box = document.getElementById('wind-joystick');
+            const knob = document.getElementById('wind-knob');
+            if (!box || !knob) return;
+
+            const max = 200;
+            const nx = THREE.MathUtils.clamp(this.params.windX / max, -1, 1);
+            const nz = THREE.MathUtils.clamp(this.params.windZ / max, -1, 1);
+
+            const px = (nx * 0.5 + 0.5) * 100; // percent
+            const py = (nz * 0.5 + 0.5) * 100;
+
+            knob.style.left = px + '%';
+            knob.style.top = py + '%';
         }
 
         selectCloth(index) {
@@ -1019,8 +1165,10 @@
         animate() {
             requestAnimationFrame(this.animate.bind(this));
             if(!this.params.paused) {
-                const wind = new THREE.Vector3(this.params.windX, this.params.windY, this.params.windZ);
-                this.cloths.forEach(c => c.update(0.018, wind, this.sphereData, this.params.gravityEnabled));
+                const wind = new THREE.Vector3(this.params.windX, this.params.windY, this.params.windZ)
+                    .multiplyScalar(this.params.windStrength);
+                const variance = this.params.windVariance;
+                this.cloths.forEach(c => c.update(0.018, wind, this.sphereData, this.params.gravityEnabled, variance));
                 this.cloths.forEach((c, i) => {
                     if (!c.isActive) return;
                     const pos = this.clothMeshes[i].geometry.attributes.position.array;
